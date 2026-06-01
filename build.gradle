@@ -19,7 +19,6 @@ import org.gradle.api.attributes.java.TargetJvmVersion
 
 plugins {
   id "idea"
-  alias(libs.plugins.artifactory) apply false // applied conditionally from releaser.gradle
   alias(libs.plugins.bnd) apply false
   alias(libs.plugins.japicmp)
   alias(libs.plugins.download)
@@ -41,7 +40,6 @@ subprojects {
   }
 }
 
-apply from: 'gradle/releaser.gradle'
 
 description = 'Reactive Object Pool root build'
 
@@ -197,11 +195,12 @@ configure(subprojects) { project ->
 
   repositories {
     mavenCentral()
-    maven { url = "https://oss.sonatype.org/content/repositories/releases/" }
+    if (version.contains('-') ) {
+      maven { url = 'https://repo.spring.io/milestone' }
+    }
     if (version.endsWith('-SNAPSHOT') || version.contains('-SNAPSHOT-')) { //classic or customized snapshots
       maven { url = 'https://repo.spring.io/snapshot' }
     }
-    maven { url = 'https://repo.spring.io/milestone' }
   }
 }
 

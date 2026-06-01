@@ -46,87 +46,12 @@ task javadocJar(type: Jar) {
 	}
 }
 
-static def qualifyVersion(String v) {
-	// Only the qualifier is needed here, so major/minor/micro/patch use non-capturing
-	// groups (?:...). The qualifier is the sole capturing group → m.group(1).
-	def m = (v =~ /^(?:\d+)\.(?:\d+)\.(?:\d+)(?:\.\d+)?(?:[.-](.+))?$/)
-	if (!m.matches()) return "BAD"
-
-	def qualifier = m.group(1)
-
-	if (qualifier == null || qualifier.isEmpty()) return "RELEASE"
-	if (qualifier.matches("(?:M|RC)\\d+")) return "MILESTONE"
-	if (qualifier == "SNAPSHOT") return "SNAPSHOT"
-
-	return "BAD"
-}
-
-ext {
-	isReleaseVersion = version.matches('[0-9]+\\.[0-9]+\\.[0-9]+(?:\\.[0-9]+)?')
-	isMilestoneVersion = version.matches('[0-9]+\\.[0-9]+\\.[0-9]+(?:\\.[0-9]+)?-M[0-9]+') || version.matches('[0-9]+\\.[0-9]+\\.[0-9]+(?:\\.[0-9]+)?-RC[0-9]+')
-	isSnapshotVersion = !(isReleaseVersion || isMilestoneVersion)
-
-	resolveVersion = { String version ->
-		if (isMilestoneVersion) {
-			return 'milestone'
-		}
-		if (isReleaseVersion) {
-			return 'release'
-		}
-		return 'snapshot'
-	}
-}
-
-static def outputToGha(String versionType, String fullVersion) {
-	def ghaFilename = System.getenv("GITHUB_OUTPUT")
-	if (ghaFilename == null) {
-		println "::set-output name=versionType::$versionType"
-		println "::set-output name=fullVersion::$fullVersion"
-	}
-	else {
-		println "using GITHUB_OUTPUT file"
-		def ghaFile = new File(ghaFilename)
-		ghaFile.withWriterAppend {
-			it.newLine()
-			it.append("versionType=$versionType")
-			it.newLine()
-			it.append("fullVersion=$fullVersion")
-		}
-	}
-}
-
-task qualifyVersionGha() {
-	doLast {
-		def versionType = qualifyVersion("$version")
-		//we ensure that if at least _one_ submodule version is BAD, we only output versionType=BAD + job fails
-		if (versionType == "BAD") {
-			outputToGha(versionType, version)
-			println "::error ::Unable to parse $version with recognizable qualifier"
-			throw new TaskExecutionException(tasks.getByName("qualifyVersionGha"), new IllegalArgumentException("Unable to parse $version with recognizable qualifier"))
-		}
-		println "Recognized $version as $versionType"
-
-		//only output the versionType and fullVersion for the main artifact
-		if (project.name == 'reactor-pool') {
-			outputToGha(versionType, version)
-		}
-	}
-}
-
 publishing {
 	repositories {
-		maven {
-			name = "mock"
-			url = rootProject.layout.buildDirectory.dir("mockRepo").get().asFile.toURI().toString()
-		}
-		if (qualifyVersion("$version") == "RELEASE") {
+		if (project.hasProperty("deploymentRepository")) {
 			maven {
-				name = "sonatype"
-				url = "https://ossrh-staging-api.central.sonatype.com/service/local/staging/deploy/maven2/"
-				credentials {
-					username findProperty("sonatypeUsername")
-					password findProperty("sonatypePassword")
-				}
+				name = 'Deployment'
+				url = project.property("deploymentRepository")
 			}
 		}
 	}
@@ -177,31 +102,6 @@ publishing {
 					url = "https://github.com/reactor/reactor-pool/issues"
 				}
 			}
-		}
-	}
-}
-
-if (rootProject.hasProperty("artifactory_publish_password")) {
-	apply plugin: "com.jfrog.artifactory"
-
-	artifactoryPublish {
-		publications(publishing.publications.mavenJava)
-	}
-}
-
-if (qualifyVersion("$version") in ["RELEASE", "MILESTONE"] || rootProject.hasProperty("forceSigning")) {
-	apply plugin: 'signing'
-
-	signing {
-		//requiring signature if there is a publish task that is not to MavenLocal
-		required {  gradle.taskGraph.allTasks.any { it.name.toLowerCase().contains("publish")	&& !it.name.contains("MavenLocal") && !it.name.contains("MockRepository") } }
-		def signingKey = findProperty("signingKey")
-		def signingPassword = findProperty("signingPassword")
-
-		useInMemoryPgpKeys(signingKey, signingPassword)
-
-		afterEvaluate {
-			sign publishing.publications.mavenJava
 		}
 	}
 }
